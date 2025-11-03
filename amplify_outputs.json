@@ -1,4 +1,5 @@
 {
+  "_comment": "This is a placeholder file. Run 'npm run sandbox' to generate the real amplify_outputs.json with your AWS backend configuration.",
   "version": "1",
   "auth": {
     "aws_region": "us-east-1",
