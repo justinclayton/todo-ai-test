@@ -168,7 +168,19 @@ npx ampx sandbox
 
 ### Styling
 
-The app uses Tailwind CSS for styling. You can customize the theme by editing `tailwind.config.ts`.
+The app uses Tailwind CSS v4 for styling. Tailwind v4 uses a new configuration approach:
+
+- **Theme customization**: Edit the `@theme inline` block in `app/globals.css` to customize colors, fonts, and other design tokens.
+- **PostCSS configuration**: The `postcss.config.mjs` file configures the Tailwind PostCSS plugin.
+
+Example of customizing colors in `app/globals.css`:
+
+```css
+@theme inline {
+  --color-primary: #your-color-here;
+  --color-secondary: #your-color-here;
+}
+```
 
 ## Learn More
 
