@@ -1,12 +1,19 @@
 import { useState, useEffect, useCallback } from 'react';
-import { generateClient } from 'aws-amplify/data';
-import type { Schema } from '../../amplify/data/resource';
+import { supabase } from '../lib/supabase';
+import { 
+  listTodos, 
+  createTodo as createTodoService, 
+  updateTodo as updateTodoService, 
+  toggleTodo as toggleTodoService, 
+  deleteTodo as deleteTodoService,
+  subscribeTodos,
+  processQueue
+} from '../lib/todoService';
 import type { Todo, TodoFilter, TodoSort } from '../types/todo';
-
-const client = generateClient<Schema>();
+import { useNetworkStatus } from './useNetworkStatus';
 
 /**
- * Hook to manage Todo CRUD operations with real-time subscriptions
+ * Hook to manage Todo CRUD operations with real-time subscriptions and offline support
  */
 export function useTodos() {
   const [todos, setTodos] = useState<Todo[]>([]);
@@ -15,19 +22,36 @@ export function useTodos() {
   const [filter, setFilter] = useState<TodoFilter>('all');
   const [searchQuery, setSearchQuery] = useState('');
   const [sortBy, setSortBy] = useState<TodoSort>('createdAt');
+  const [userId, setUserId] = useState<string | null>(null);
+  const { isOnline, isSyncing, setIsSyncing } = useNetworkStatus();
+
+  // Fetch user on mount
+  useEffect(() => {
+    supabase.auth.getUser().then(({ data }) => {
+      setUserId(data.user?.id || null);
+    });
+
+    const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
+      setUserId(session?.user?.id || null);
+    });
+
+    return () => {
+      subscription.unsubscribe();
+    };
+  }, []);
 
   // Fetch todos
   const fetchTodos = useCallback(async () => {
     try {
       setLoading(true);
       setError(null);
-      const { data, errors } = await client.models.Todo.list();
+      const { data, error: fetchError } = await listTodos();
       
-      if (errors) {
-        throw new Error(errors[0]?.message || 'Failed to fetch todos');
+      if (fetchError) {
+        throw fetchError;
       }
       
-      setTodos((data || []) as Todo[]);
+      setTodos(data || []);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'An error occurred');
     } finally {
@@ -40,32 +64,33 @@ export function useTodos() {
     const optimisticId = `temp-${Date.now()}`;
     const optimisticTodo: Todo = {
       id: optimisticId,
+      user_id: userId || '',
       name,
       description: description || null,
       completed: false,
-      owner: null,
-      createdAt: new Date().toISOString(),
-      updatedAt: new Date().toISOString(),
+      created_at: new Date().toISOString(),
+      updated_at: new Date().toISOString(),
     };
 
     // Optimistic update
     setTodos((prev) => [optimisticTodo, ...prev]);
 
     try {
-      const { data, errors } = await client.models.Todo.create({
-        name,
-        description,
-        completed: false,
-      });
+      const { data, error: createError } = await createTodoService(
+        { name, description },
+        isOnline
+      );
 
-      if (errors) {
-        throw new Error(errors[0]?.message || 'Failed to create todo');
+      if (createError) {
+        throw createError;
       }
 
-      // Replace optimistic with real data
-      setTodos((prev) =>
-        prev.map((todo) => (todo.id === optimisticId ? (data as Todo) : todo))
-      );
+      // Replace optimistic with real data if online
+      if (data) {
+        setTodos((prev) =>
+          prev.map((todo) => (todo.id === optimisticId ? data : todo))
+        );
+      }
       
       return data;
     } catch (err) {
@@ -74,7 +99,7 @@ export function useTodos() {
       setError(err instanceof Error ? err.message : 'Failed to create todo');
       throw err;
     }
-  }, []);
+  }, [userId, isOnline]);
 
   // Update todo with optimistic update
   const updateTodo = useCallback(async (
@@ -87,25 +112,28 @@ export function useTodos() {
     setTodos((prev) =>
       prev.map((todo) =>
         todo.id === id
-          ? { ...todo, ...updates, updatedAt: new Date().toISOString() }
+          ? { ...todo, ...updates, updated_at: new Date().toISOString() }
           : todo
       )
     );
 
     try {
-      const { data, errors } = await client.models.Todo.update({
+      const { data, error: updateError } = await updateTodoService(
         id,
-        ...updates,
-      });
+        updates,
+        isOnline
+      );
 
-      if (errors) {
-        throw new Error(errors[0]?.message || 'Failed to update todo');
+      if (updateError) {
+        throw updateError;
       }
 
-      // Update with server response
-      setTodos((prev) =>
-        prev.map((todo) => (todo.id === id ? (data as Todo) : todo))
-      );
+      // Update with server response if available
+      if (data) {
+        setTodos((prev) =>
+          prev.map((todo) => (todo.id === id ? data : todo))
+        );
+      }
       
       return data;
     } catch (err) {
@@ -114,7 +142,7 @@ export function useTodos() {
       setError(err instanceof Error ? err.message : 'Failed to update todo');
       throw err;
     }
-  }, [todos]);
+  }, [todos, isOnline]);
 
   // Delete todo with optimistic update
   const deleteTodo = useCallback(async (id: string) => {
@@ -124,10 +152,10 @@ export function useTodos() {
     setTodos((prev) => prev.filter((todo) => todo.id !== id));
 
     try {
-      const { errors } = await client.models.Todo.delete({ id });
+      const { error: deleteError } = await deleteTodoService(id, isOnline);
 
-      if (errors) {
-        throw new Error(errors[0]?.message || 'Failed to delete todo');
+      if (deleteError) {
+        throw deleteError;
       }
     } catch (err) {
       // Rollback on error
@@ -135,17 +163,71 @@ export function useTodos() {
       setError(err instanceof Error ? err.message : 'Failed to delete todo');
       throw err;
     }
-  }, [todos]);
+  }, [todos, isOnline]);
 
   // Toggle completed status
   const toggleTodo = useCallback(
     async (id: string, completed: boolean) => {
-      return updateTodo(id, { completed });
+      const originalTodos = [...todos];
+      
+      // Optimistic update
+      setTodos((prev) =>
+        prev.map((todo) =>
+          todo.id === id
+            ? { ...todo, completed, updated_at: new Date().toISOString() }
+            : todo
+        )
+      );
+
+      try {
+        const { data, error: toggleError } = await toggleTodoService(
+          id,
+          completed,
+          isOnline
+        );
+
+        if (toggleError) {
+          throw toggleError;
+        }
+
+        // Update with server response if available
+        if (data) {
+          setTodos((prev) =>
+            prev.map((todo) => (todo.id === id ? data : todo))
+          );
+        }
+      } catch (err) {
+        // Rollback on error
+        setTodos(originalTodos);
+        setError(err instanceof Error ? err.message : 'Failed to toggle todo');
+        throw err;
+      }
     },
-    [updateTodo]
+    [todos, isOnline]
   );
 
-  // Filter and sort todos
+  // Process offline queue when coming back online
+  useEffect(() => {
+    if (isOnline && !isSyncing) {
+      setIsSyncing(true);
+      processQueue()
+        .then(({ processed, failed, errors }) => {
+          if (processed > 0) {
+            console.log(`Processed ${processed} queued mutations`);
+            // Refresh todos after processing queue
+            fetchTodos();
+          }
+          if (failed > 0) {
+            console.warn(`Failed to process ${failed} mutations`, errors);
+          }
+        })
+        .finally(() => {
+          setTimeout(() => setIsSyncing(false), 1000);
+        });
+    }
+  }, [isOnline, isSyncing, setIsSyncing, fetchTodos]);
+
+  // Filter and sort todos client-side
   const filteredTodos = todos
     .filter((todo) => {
       // Apply filter
@@ -166,49 +248,46 @@ export function useTodos() {
       if (sortBy === 'name') {
         return a.name.localeCompare(b.name);
       }
-      // Default: sort by createdAt (newest first)
-      return new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime();
+      // Default: sort by created_at (newest first)
+      return new Date(b.created_at).getTime() - new Date(a.created_at).getTime();
     });
 
   // Subscribe to real-time updates
   useEffect(() => {
+    if (!userId) return;
+
     fetchTodos();
 
-    const createSub = client.models.Todo.onCreate().subscribe({
-      next: (data) => {
+    const unsubscribe = subscribeTodos(userId, {
+      onInsert: (todo) => {
         setTodos((prev) => {
           // Avoid duplicates
-          if (prev.some((todo) => todo.id === data.id)) {
+          if (prev.some((t) => t.id === todo.id)) {
             return prev;
           }
-          return [data as Todo, ...prev];
+          return [todo, ...prev];
         });
       },
-      error: (error) => console.error('Subscription error:', error),
-    });
-
-    const updateSub = client.models.Todo.onUpdate().subscribe({
-      next: (data) => {
+      onUpdate: (todo) => {
         setTodos((prev) =>
-          prev.map((todo) => (todo.id === data.id ? (data as Todo) : todo))
+          prev.map((t) => {
+            if (t.id === todo.id) {
+              // Merge using last-write-wins based on updated_at
+              if (new Date(todo.updated_at) >= new Date(t.updated_at)) {
+                return todo;
+              }
+            }
+            return t;
+          })
         );
       },
-      error: (error) => console.error('Subscription error:', error),
-    });
-
-    const deleteSub = client.models.Todo.onDelete().subscribe({
-      next: (data) => {
-        setTodos((prev) => prev.filter((todo) => todo.id !== data.id));
+      onDelete: (todo) => {
+        setTodos((prev) => prev.filter((t) => t.id !== todo.id));
       },
-      error: (error) => console.error('Subscription error:', error),
     });
 
-    return () => {
-      createSub.unsubscribe();
-      updateSub.unsubscribe();
-      deleteSub.unsubscribe();
-    };
-  }, [fetchTodos]);
+    return unsubscribe;
+  }, [userId, fetchTodos]);
 
   const stats = {
     total: todos.length,

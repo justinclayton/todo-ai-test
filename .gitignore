@@ -23,20 +23,6 @@ dist-ssr
 *.sln
 *.sw?
 
-# Amplify
-.amplify
-amplify/backend/awscloudformation
-amplify/#current-cloud-backend
-amplify/.config/local-*
-amplify/mock-data
-amplify/backend/amplify-meta.json
-amplify/backend/.temp
-build/
-.amplify-hosting
-
-# Generated files (keep the placeholder for reference)
-# amplify_outputs.json
-
 # Test coverage
 coverage
 .nyc_output
@@ -45,4 +31,7 @@ coverage
 .env
 .env.local
 .env.*.local
+
+# Netlify
+.netlify
 

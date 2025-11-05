@@ -1,8 +1,8 @@
 import { useState, useEffect } from 'react';
 
 /**
- * Hook to detect online/offline status
- * @returns Object with isOnline state and isSyncing state
+ * Hook to detect online/offline status and manage syncing state
+ * @returns Object with isOnline state, isSyncing state, and setter for syncing
  */
 export function useNetworkStatus() {
   const [isOnline, setIsOnline] = useState(navigator.onLine);
@@ -11,9 +11,7 @@ export function useNetworkStatus() {
   useEffect(() => {
     const handleOnline = () => {
       setIsOnline(true);
-      setIsSyncing(true);
-      // Simulate sync delay
-      setTimeout(() => setIsSyncing(false), 2000);
+      // Syncing will be managed by useTodos when processing queue
     };
 
     const handleOffline = () => {
@@ -30,5 +28,5 @@ export function useNetworkStatus() {
     };
   }, []);
 
-  return { isOnline, isSyncing };
+  return { isOnline, isSyncing, setIsSyncing };
 }
