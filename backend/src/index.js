@@ -291,13 +291,26 @@ export async function handler(event) {
   try {
     // Route handling
     if (method === 'GET' && path === '/todos') {
-      const nextToken = event.queryStringParameters?.nextToken;
-      const lastKey = nextToken ? JSON.parse(nextToken) : null;
+      let lastKey = null;
+      if (event.queryStringParameters?.nextToken) {
+        try {
+          lastKey = JSON.parse(event.queryStringParameters.nextToken);
+        } catch (e) {
+          logger.info('Invalid nextToken format', { error: e.message });
+          return createResponse(400, { error: 'Bad request', message: 'Invalid pagination token' });
+        }
+      }
       return await listTodos(logger, lastKey);
     }
     
     if (method === 'POST' && path === '/todos') {
-      const data = JSON.parse(event.body || '{}');
+      let data;
+      try {
+        data = JSON.parse(event.body || '{}');
+      } catch (e) {
+        logger.info('Invalid JSON in request body', { error: e.message });
+        return createResponse(400, { error: 'Bad request', message: 'Invalid JSON in request body' });
+      }
       return await createTodo(logger, data);
     }
     
@@ -306,7 +319,13 @@ export async function handler(event) {
     }
     
     if (method === 'PUT' && path === '/todos/{id}') {
-      const data = JSON.parse(event.body || '{}');
+      let data;
+      try {
+        data = JSON.parse(event.body || '{}');
+      } catch (e) {
+        logger.info('Invalid JSON in request body', { error: e.message });
+        return createResponse(400, { error: 'Bad request', message: 'Invalid JSON in request body' });
+      }
       return await updateTodo(logger, pathParams.id, data);
     }
     

@@ -35,7 +35,7 @@ if [ -n "$CLOUDFRONT_ID" ] && [ "$CLOUDFRONT_ID" != "null" ]; then
   echo "Creating CloudFront invalidation..."
   aws cloudfront create-invalidation \
     --distribution-id $CLOUDFRONT_ID \
-    --paths "/index.html" "/" 
+    --paths "/index.html" "/"
   echo "CloudFront invalidation created!"
 fi
 
