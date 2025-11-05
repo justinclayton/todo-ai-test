@@ -18,6 +18,9 @@ jobs:
   deploy:
     runs-on: ubuntu-latest
     environment: ${{ github.event.inputs.stage || 'dev' }}
+    permissions:
+      contents: read
+      id-token: write  # For OIDC authentication with AWS if used
     
     steps:
       - uses: actions/checkout@v4
