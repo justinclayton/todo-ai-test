@@ -1,0 +1,13 @@
+# Terraform example variables
+# For local development, these are set by the terraform-local-init.sh script
+# For AWS deployment, copy to terraform.tfvars and customize
+
+# aws_region = "us-east-1"
+# project_name = "todo-app"
+# stage = "dev"
+# allowed_origin = "https://your-domain.com"
+# enable_cloudfront = true
+
+# Optional: Custom domain and certificate
+# domain_name = "todo.example.com"
+# certificate_arn = "arn:aws:acm:us-east-1:123456789012:certificate/..."
